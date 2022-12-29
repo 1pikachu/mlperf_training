@@ -9,11 +9,11 @@ function main {
     set_environment
 
     # requirements
-    cd mlperf_training/object_detection/pytorch
-    pip uninstall maskrcnn-benchmark && python setup.py develop
+    cd object_detection/pytorch
+    pip uninstall maskrcnn-benchmark -y && python setup.py develop
     pip install opencv-contrib-python==4.5.5.64
 
-    git clone https://github.com/mlperf/logging.git mlperf-logging
+    rm -rf mlperf-logging && git clone https://github.com/mlperf/logging.git mlperf-logging
     pip install -e mlperf-logging
 
     # if multiple use 'xxx,xxx,xxx'
