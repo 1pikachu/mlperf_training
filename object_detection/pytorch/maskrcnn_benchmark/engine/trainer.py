@@ -15,12 +15,27 @@
 import datetime
 import logging
 import time
+import os
 
 import torch
 import torch.distributed as dist
 
 from maskrcnn_benchmark.utils.comm import get_world_size, is_main_process
 from maskrcnn_benchmark.utils.metric_logger import MetricLogger
+
+def trace_handler(p):
+    output = p.key_averages().table(sort_by="self_cpu_time_total")
+    print(output)
+    import pathlib
+    timeline_dir = str(pathlib.Path.cwd()) + '/timeline/'
+    if not os.path.exists(timeline_dir):
+        try:
+            os.makedirs(timeline_dir)
+        except:
+            pass
+    timeline_file = timeline_dir + 'timeline-' + str(torch.backends.quantized.engine) + \
+            '-' + str(p.step_num) + '-' + str(os.getpid()) + '.json'
+    p.export_chrome_trace(timeline_file)
 
 def reduce_loss_dict(loss_dict):
     """
@@ -62,6 +77,7 @@ def do_train(
     device,
     checkpoint_period,
     arguments,
+    args,
     per_iter_start_callback_fn=None,
     per_iter_end_callback_fn=None,
 ):
@@ -69,89 +85,183 @@ def do_train(
     logger.info("Start training")
     meters = MetricLogger(delimiter="  ")
     max_iter = len(data_loader)
-    start_iter = arguments["iteration"]
+    start_iter = 0
     model.train()
     start_training_time = time.time()
     end = time.time()
 
-    for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
+    total_time = 0.0
+    total_count = 0
+    profile_len = min(max_iter, args.num_iter) // 2
+    datatype = torch.float16 if args.precision == "float16" else torch.bfloat16 if args.precision == "bfloat16" else torch.float
+    if args.profile and args.device == "xpu":
+        for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
+            scheduler.step()
 
-        if per_iter_start_callback_fn is not None:
-            per_iter_start_callback_fn(iteration=iteration)
+            start_time = time.time()
+            images = images.to(device)
+            targets = [target.to(device) for target in targets]
 
-        data_time = time.time() - end
-        iteration = iteration + 1
-        arguments["iteration"] = iteration
+            with torch.xpu.amp.autocast(enabled=True, dtype=datatype):
+                loss_dict = model(images, targets)
 
-        scheduler.step()
+            losses = sum(loss for loss in loss_dict.values())
 
-        images = images.to(device)
-        targets = [target.to(device) for target in targets]
+            # reduce losses over all GPUs for logging purposes
+            loss_dict_reduced = reduce_loss_dict(loss_dict)
+            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+            meters.update(loss=losses_reduced, **loss_dict_reduced)
 
-        loss_dict = model(images, targets)
+            losses.backward()
 
-        losses = sum(loss for loss in loss_dict.values())
+            optimizer.step()
+            optimizer.zero_grad()
 
-        # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced = reduce_loss_dict(loss_dict)
-        losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-        meters.update(loss=losses_reduced, **loss_dict_reduced)
+            torch.xpu.synchronize()
 
-        losses.backward()
+            duration = time.time() - start_time
+            print("iteration:{}, training time: {} sec.".format(iteration, duration))
+            if iteration >= args.num_warmup:
+                total_time += duration
+                total_count += 1
+            if iteration == profile_len:
+                import pathlib
+                timeline_dir = str(pathlib.Path.cwd()) + '/timeline/'
+                if not os.path.exists(timeline_dir):
+                    try:
+                        os.makedirs(timeline_dir)
+                    except:
+                        pass
+                torch.save(prof.key_averages().table(sort_by="self_xpu_time_total"),
+                    timeline_dir+'profile.pt')
+                torch.save(prof.key_averages(group_by_input_shape=True).table(),
+                    timeline_dir+'profile_detail.pt')
+                torch.save(prof.table(sort_by="id", row_limit=100000),
+                    timeline_dir+'profile_detail_withId.pt')
+                prof.export_chrome_trace(timeline_dir+"trace.json")
+    elif args.profile and args.device == "cuda":
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True,
+            schedule=torch.profiler.schedule(
+                wait=profile_len,
+                warmup=2,
+                active=1,
+            ),
+            on_trace_ready=trace_handler,
+        ) as p:
+            for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
+                scheduler.step()
 
-        optimizer.step()
-        optimizer.zero_grad()
+                start_time = time.time()
+                images = images.to(device)
+                targets = [target.to(device) for target in targets]
 
-        batch_time = time.time() - end
-        end = time.time()
-        meters.update(time=batch_time, data=data_time)
+                loss_dict = model(images, targets)
 
-        eta_seconds = meters.time.global_avg * (max_iter - iteration)
-        eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+                with torch.cuda.amp.autocast(enabled=True, dtype=datatype):
+                    losses = sum(loss for loss in loss_dict.values())
 
-        if iteration % 20 == 0 or iteration == max_iter:
-            logger.info(
-                meters.delimiter.join(
-                    [
-                        "eta: {eta}",
-                        "iter: {iter}",
-                        "{meters}",
-                        "lr: {lr:.6f}",
-                        "max mem: {memory:.0f}",
-                    ]
-                ).format(
-                    eta=eta_string,
-                    iter=iteration,
-                    meters=str(meters),
-                    lr=optimizer.param_groups[0]["lr"],
-                    memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0,
-                )
-            )
-        if iteration % checkpoint_period == 0 and arguments["save_checkpoints"]:
-            checkpointer.save("model_{:07d}".format(iteration), **arguments)
-        if iteration == max_iter and arguments["save_checkpoints"]:
-            checkpointer.save("model_final", **arguments)
+                # reduce losses over all GPUs for logging purposes
+                loss_dict_reduced = reduce_loss_dict(loss_dict)
+                losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+                meters.update(loss=losses_reduced, **loss_dict_reduced)
 
-        # per-epoch work (testing)
-        if per_iter_end_callback_fn is not None:
-            # Note: iteration has been incremented previously for
-            # human-readable checkpoint names (i.e. 60000 instead of 59999)
-            # so need to adjust again here
-            early_exit = per_iter_end_callback_fn(iteration=iteration-1)
-            if early_exit:
-                break
+                losses.backward()
 
-    total_training_time = time.time() - start_training_time
-    total_time_str = str(datetime.timedelta(seconds=total_training_time))
-    logger.info(
-        "Total training time: {} ({:.4f} s / it)".format(
-            total_time_str, total_training_time / (max_iter)
-        )
-    )
-    if per_iter_end_callback_fn is not None:
-        if early_exit:
-            return True
-        else:
-            return False
+                optimizer.step()
+                optimizer.zero_grad()
+
+                torch.cuda.synchronize()
+                duration = time.time() - start_time
+                p.step()
+                print("iteration:{}, training time: {} sec.".format(iteration, duration))
+                if iteration >= args.num_warmup:
+                    total_time += duration
+                    total_count += 1
+    elif args.profile and args.device == "cpu":
+        with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU],
+            record_shapes=True,
+            schedule=torch.profiler.schedule(
+                wait=profile_len,
+                warmup=2,
+                active=1,
+            ),
+            on_trace_ready=trace_handler,
+        ) as p:
+            for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
+                scheduler.step()
+
+                start_time = time.time()
+                images = images.to(device)
+                targets = [target.to(device) for target in targets]
+
+                loss_dict = model(images, targets)
+
+                losses = sum(loss for loss in loss_dict.values())
+
+                # reduce losses over all GPUs for logging purposes
+                loss_dict_reduced = reduce_loss_dict(loss_dict)
+                losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+                meters.update(loss=losses_reduced, **loss_dict_reduced)
+
+                losses.backward()
+
+                optimizer.step()
+                optimizer.zero_grad()
+
+                duration = time.time() - start_time
+                p.step()
+                print("iteration:{}, training time: {} sec.".format(iteration, duration))
+                if iteration >= args.num_warmup:
+                    total_time += duration
+                    total_count += 1
     else:
-        return None
+        for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
+            scheduler.step()
+
+            start_time = time.time()
+            images = images.to(device)
+            targets = [target.to(device) for target in targets]
+
+            if args.device == "xpu":
+                with torch.xpu.amp.autocast(enabled=True, dtype=datatype):
+                    loss_dict = model(images, targets)
+            elif args.device == "cuda":
+                with torch.cuda.amp.autocast(enabled=True, dtype=datatype):
+                    loss_dict = model(images, targets)
+            else:
+                loss_dict = model(images, targets)
+
+            losses = sum(loss for loss in loss_dict.values())
+
+            # reduce losses over all GPUs for logging purposes
+            loss_dict_reduced = reduce_loss_dict(loss_dict)
+            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+            meters.update(loss=losses_reduced, **loss_dict_reduced)
+
+            losses.backward()
+
+            optimizer.step()
+            optimizer.zero_grad()
+
+            if args.device == "xpu":
+                torch.xpu.synchronize()
+            elif args.device == "cuda":
+                torch.cuda.synchronize()
+            duration = time.time() - start_time
+            print("iteration:{}, training time: {} sec.".format(iteration, duration))
+            if iteration >= args.num_warmup:
+                total_time += duration
+                total_count += 1
+
+    batch_size = args.batch_size
+    avg_time = total_time / total_count
+    latency = avg_time / batch_size * 1000
+    perf = batch_size / avg_time
+    print("total time:{}, total count:{}".format(total_time, total_count))
+    print('%d epoch training latency: %6.2f ms'%(0, latency))
+    print('%d epoch training Throughput: %6.2f fps'%(0, perf))
+
+    return None

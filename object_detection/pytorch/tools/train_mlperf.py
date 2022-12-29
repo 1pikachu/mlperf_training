@@ -115,16 +115,20 @@ def cast_frozen_bn_to_half(module):
         cast_frozen_bn_to_half(child)
     return module
 
-def train(cfg, local_rank, distributed, random_number_generator):
+def train(cfg, local_rank, distributed, random_number_generator, args):
     # Model logging
     log_event(key=constants.GLOBAL_BATCH_SIZE, value=cfg.SOLVER.IMS_PER_BATCH)
     log_event(key=constants.NUM_IMAGE_CANDIDATES, value=cfg.MODEL.RPN.FPN_POST_NMS_TOP_N_TRAIN)
 
     model = build_detection_model(cfg)
-    device = torch.device(cfg.MODEL.DEVICE)
+    device = torch.device(args.device)
     model.to(device)
 
     optimizer = make_optimizer(cfg, model)
+    if args.device == "xpu":
+        datatype = torch.float16 if args.precision == "float16" else torch.bfloat16 if args.precision == "bfloat16" else torch.float
+        model, optimizer = torch.xpu.optimize(model=model, optimizer=optimizer, dtype=datatype)
+
     # Optimizer logging
     log_event(key=constants.OPT_NAME, value="sgd_with_momentum")
     log_event(key=constants.OPT_BASE_LR, value=cfg.SOLVER.BASE_LR)
@@ -174,17 +178,17 @@ def train(cfg, local_rank, distributed, random_number_generator):
 
     # set the callback function to evaluate and potentially
     # early exit each epoch
-    if cfg.PER_EPOCH_EVAL:
-        per_iter_callback_fn = functools.partial(
-                mlperf_test_early_exit,
-                iters_per_epoch=iters_per_epoch,
-                tester=functools.partial(test, cfg=cfg),
-                model=model,
-                distributed=distributed,
-                min_bbox_map=cfg.MLPERF.MIN_BBOX_MAP,
-                min_segm_map=cfg.MLPERF.MIN_SEGM_MAP)
-    else:
-        per_iter_callback_fn = None
+    #if cfg.PER_EPOCH_EVAL:
+    #    per_iter_callback_fn = functools.partial(
+    #            mlperf_test_early_exit,
+    #            iters_per_epoch=iters_per_epoch,
+    #            tester=functools.partial(test, cfg=cfg),
+    #            model=model,
+    #            distributed=distributed,
+    #            min_bbox_map=cfg.MLPERF.MIN_BBOX_MAP,
+    #            min_segm_map=cfg.MLPERF.MIN_SEGM_MAP)
+    #else:
+    per_iter_callback_fn = None
 
     start_train_time = time.time()
 
@@ -197,6 +201,7 @@ def train(cfg, local_rank, distributed, random_number_generator):
         device,
         checkpoint_period,
         arguments,
+        args,
         per_iter_start_callback_fn=functools.partial(mlperf_log_epoch_start, iters_per_epoch=iters_per_epoch),
         per_iter_end_callback_fn=per_iter_callback_fn,
     )
@@ -208,7 +213,6 @@ def train(cfg, local_rank, distributed, random_number_generator):
     )
 
     return model, success
-
 
 
 def main():
@@ -224,6 +228,17 @@ def main():
         type=str,
     )
     parser.add_argument("--local_rank", type=int, default=0)
+    # OOB
+    parser.add_argument('--batch_size', default=1, type=int, help='batch size')
+    parser.add_argument('--precision', default="float32", type=str, help='precision')
+    parser.add_argument('--channels_last', default=1, type=int, help='Use NHWC or not')
+    parser.add_argument('--jit', action='store_true', default=False, help='enable JIT')
+    parser.add_argument('--profile', action='store_true', default=False, help='collect timeline')
+    parser.add_argument('--num_iter', default=200, type=int, help='test iterations')
+    parser.add_argument('--num_warmup', default=20, type=int, help='test warmup')
+    parser.add_argument('--device', default='cpu', type=str, help='cpu, cuda or xpu')
+    parser.add_argument('--nv_fuser', action='store_true', default=False, help='enable nv fuser')
+
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
@@ -232,6 +247,11 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.device == "xpu":
+        import intel_extension_for_pytorch
+    elif args.device == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = False
 
     num_gpus = int(os.environ["WORLD_SIZE"]) if "WORLD_SIZE" in os.environ else 1
     args.distributed = num_gpus > 1
@@ -264,6 +284,10 @@ def main():
 
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
+
+    cfg.SOLVER.IMS_PER_BATCH = args.batch_size
+    cfg.SOLVER.MAX_ITER = args.num_iter
+    cfg.SOLVER.WARMUP_ITERS = args.num_warmup
     cfg.freeze()
 
     output_dir = cfg.OUTPUT_DIR
@@ -295,7 +319,7 @@ def main():
         logger.info(config_str)
     logger.info("Running with config:\n{}".format(cfg))
 
-    model, success = train(cfg, args.local_rank, args.distributed, random_number_generator)
+    model, success = train(cfg, args.local_rank, args.distributed, random_number_generator, args)
 
     if success is not None:
         if success:

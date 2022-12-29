@@ -16,6 +16,7 @@ model_urls = {
     'resnext50_32x4d': 'https://download.pytorch.org/models/resnext50_32x4d-7cdf4587.pth',
     'resnet101': 'https://download.pytorch.org/models/resnet101-63fe2227.pth',
     'resnext101_32x8d': 'https://download.pytorch.org/models/resnext101_32x8d-8ba56ff5.pth',
+    'resnet34': 'https://download.pytorch.org/models/resnet34-b627a593.pth',
 }
 
 
@@ -314,3 +315,8 @@ def resnext101_32x8d(pretrained: bool = False, progress: bool = True, **kwargs: 
     kwargs['width_per_group'] = 8
     return _resnet('resnext101_32x8d', Bottleneck, [3, 4, 23, 3],
                    pretrained, progress, **kwargs)
+
+
+def resnet34(pretrained: bool = False, progress: bool = True, **kwargs: Any) -> ResNet:
+    return _resnet('resnet34', BasicBlock, [3, 4, 6, 3], pretrained, progress,
+                   **kwargs)

@@ -41,8 +41,8 @@ def parse_args(add_help=True):
     parser = argparse.ArgumentParser(description='PyTorch Detection Training', add_help=add_help)
 
     # Model
-    parser.add_argument('--backbone', default='resnext50_32x4d',
-                        choices=['resnet50', 'resnext50_32x4d', 'resnet101', 'resnext101_32x8d'],
+    parser.add_argument('--backbone', default='resnet34',
+                        choices=['resnet50', 'resnext50_32x4d', 'resnet101', 'resnext101_32x8d', 'resnet34'],
                         help='The model backbone')
     parser.add_argument('--trainable-backbone-layers', default=3, type=int,
                         help='number of trainable layers of backbone')
