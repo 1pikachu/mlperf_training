@@ -90,6 +90,10 @@ def do_train(
     start_training_time = time.time()
     end = time.time()
 
+    if args.channels_last and args.device != "xpu":
+        model = model.to(memory_format=torch.channels_last)
+        print("---- use NHWC format")
+
     total_time = 0.0
     total_count = 0
     profile_len = min(max_iter, args.num_iter) // 2
@@ -153,14 +157,16 @@ def do_train(
             for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
                 scheduler.step()
 
+                if args.channels_last and args.device != "xpu":
+                    images.tensors = images.tensors.to(memory_format=torch.channels_last)
                 start_time = time.time()
                 images = images.to(device)
                 targets = [target.to(device) for target in targets]
 
-                loss_dict = model(images, targets)
-
                 with torch.cuda.amp.autocast(enabled=True, dtype=datatype):
-                    losses = sum(loss for loss in loss_dict.values())
+                    loss_dict = model(images, targets)
+
+                losses = sum(loss for loss in loss_dict.values())
 
                 # reduce losses over all GPUs for logging purposes
                 loss_dict_reduced = reduce_loss_dict(loss_dict)
@@ -193,11 +199,14 @@ def do_train(
             for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
                 scheduler.step()
 
+                if args.channels_last and args.device != "xpu":
+                    images.tensors = images.tensors.to(memory_format=torch.channels_last)
                 start_time = time.time()
                 images = images.to(device)
                 targets = [target.to(device) for target in targets]
 
-                loss_dict = model(images, targets)
+                with torch.cpu.amp.autocast(enabled=True, dtype=datatype):
+                    loss_dict = model(images, targets)
 
                 losses = sum(loss for loss in loss_dict.values())
 
@@ -221,6 +230,8 @@ def do_train(
         for iteration, (images, targets, _) in enumerate(data_loader, start_iter):
             scheduler.step()
 
+            if args.channels_last and args.device != "xpu":
+                images.tensors = images.tensors.to(memory_format=torch.channels_last)
             start_time = time.time()
             images = images.to(device)
             targets = [target.to(device) for target in targets]
@@ -232,7 +243,8 @@ def do_train(
                 with torch.cuda.amp.autocast(enabled=True, dtype=datatype):
                     loss_dict = model(images, targets)
             else:
-                loss_dict = model(images, targets)
+                with torch.cpu.amp.autocast(enabled=True, dtype=datatype):
+                    loss_dict = model(images, targets)
 
             losses = sum(loss for loss in loss_dict.values())
 
