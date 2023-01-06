@@ -11,7 +11,7 @@ function main {
     # requirements
     cd object_detection/pytorch
     rm -rf datasets && mkdir datasets
-    ln -sf ${DATASET_DIR} coco
+    ln -sf ${DATASET_DIR} datasets/coco
     pip uninstall maskrcnn-benchmark -y && python setup.py develop
     pip install opencv-contrib-python==4.5.5.64
 
