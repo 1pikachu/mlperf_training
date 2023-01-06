@@ -106,7 +106,7 @@ def do_train(
             images = images.to(device)
             targets = [target.to(device) for target in targets]
 
-            with torch.xpu.amp.autocast(enabled=True, dtype=datatype):
+            with torch.xpu.amp.autocast(enabled=True if args.precision != "float32" else False, dtype=datatype):
                 loss_dict = model(images, targets)
 
             losses = sum(loss for loss in loss_dict.values())
@@ -163,7 +163,7 @@ def do_train(
                 images = images.to(device)
                 targets = [target.to(device) for target in targets]
 
-                with torch.cuda.amp.autocast(enabled=True, dtype=datatype):
+                with torch.cuda.amp.autocast(enabled=True if args.precision != "float32" else False, dtype=datatype):
                     loss_dict = model(images, targets)
 
                 losses = sum(loss for loss in loss_dict.values())
@@ -205,7 +205,7 @@ def do_train(
                 images = images.to(device)
                 targets = [target.to(device) for target in targets]
 
-                with torch.cpu.amp.autocast(enabled=True, dtype=datatype):
+                with torch.cpu.amp.autocast(enabled=True if args.precision != "float32" else False, dtype=datatype):
                     loss_dict = model(images, targets)
 
                 losses = sum(loss for loss in loss_dict.values())
