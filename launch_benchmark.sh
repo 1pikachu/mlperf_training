@@ -68,7 +68,7 @@ function generate_core {
 	    python tools/train_mlperf.py \
 	        --batch_size ${batch_size} --device ${device} \
 		--num_iter $num_iter --num_warmup $num_warmup \
-		--channels_last $channels_last --precision $precision \
+		--channels_last $channels_last --precision float32 \
 		--config-file "configs/e2e_mask_rcnn_R_50_FPN_1x.yaml" \
                 ${addtion_options} \
         > ${log_file} 2>&1 &  \n" |tee -a ${excute_cmd_file}
