@@ -9,6 +9,7 @@ function main {
     set_environment
 
     # requirements
+    pip install -r requirements.txt
     cd object_detection/pytorch
     rm -rf datasets && mkdir datasets
     ln -sf ${DATASET_DIR} datasets/coco
