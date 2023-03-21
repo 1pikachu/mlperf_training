@@ -19,6 +19,7 @@ from torch.autograd.function import once_differentiable
 from torch.nn.modules.utils import _pair
 
 from maskrcnn_benchmark import _C
+import torchvision
 
 
 class _ROIAlign(Function):
@@ -57,7 +58,7 @@ class _ROIAlign(Function):
         return grad_input, None, None, None, None
 
 
-roi_align = _ROIAlign.apply
+roi_align = torchvision.ops.roi_align
 
 
 class ROIAlign(nn.Module):

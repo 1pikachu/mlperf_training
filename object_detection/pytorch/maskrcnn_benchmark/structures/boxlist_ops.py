@@ -17,6 +17,7 @@ import torch
 from .bounding_box import BoxList
 
 from maskrcnn_benchmark.layers import nms as _box_nms
+import torchvision
 
 
 def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
@@ -37,7 +38,7 @@ def boxlist_nms(boxlist, nms_thresh, max_proposals=-1, score_field="scores"):
     boxlist = boxlist.convert("xyxy")
     boxes = boxlist.bbox
     score = boxlist.get_field(score_field)
-    keep = _box_nms(boxes, score, nms_thresh)
+    keep = torchvision.ops.nms(boxes, score, nms_thresh)
     if max_proposals > 0:
         keep = keep[: max_proposals]
     boxlist = boxlist[keep]
