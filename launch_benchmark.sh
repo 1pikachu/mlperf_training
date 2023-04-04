@@ -14,7 +14,7 @@ function main {
     rm -rf datasets && mkdir datasets
     ln -sf ${DATASET_DIR} datasets/coco
     pip uninstall maskrcnn-benchmark -y && python setup.py develop
-    pip install opencv-contrib-python==4.5.5.64 opencv-python=4.5.5.64 opencv-python-headless=4.5.5.64
+    pip install opencv-contrib-python==4.5.5.64 opencv-python==4.5.5.64 opencv-python-headless==4.5.5.64
 
     rm -rf mlperf-logging && git clone https://github.com/mlperf/logging.git mlperf-logging
     pip install -e mlperf-logging
