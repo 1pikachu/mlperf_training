@@ -14,7 +14,7 @@ function main {
     rm -rf datasets && mkdir datasets
     ln -sf ${DATASET_DIR} datasets/coco
     pip uninstall maskrcnn-benchmark -y && python setup.py develop
-    pip install opencv-contrib-python==4.5.5.64
+    pip install opencv-contrib-python==4.5.5.64 opencv-python=4.5.5.64 opencv-python-headless=4.5.5.64
 
     rm -rf mlperf-logging && git clone https://github.com/mlperf/logging.git mlperf-logging
     pip install -e mlperf-logging
@@ -66,7 +66,7 @@ function generate_core {
 	    python tools/train_mlperf.py \
 	        --batch_size ${batch_size} --device ${device} \
 		--num_iter $num_iter --num_warmup $num_warmup \
-		--channels_last $channels_last --precision float32 \
+		--channels_last $channels_last --precision ${precision} \
 		--config-file "configs/e2e_mask_rcnn_R_50_FPN_1x.yaml" \
                 ${addtion_options} \
         > ${log_file} 2>&1 &  \n" |tee -a ${excute_cmd_file}
