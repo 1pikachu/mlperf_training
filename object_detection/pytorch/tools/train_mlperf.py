@@ -308,7 +308,9 @@ def main():
     # Setting worker seeds
     logger.info("Worker {}: Setting seed {}".format(args.local_rank, worker_seeds[args.local_rank]))
     #torch.manual_seed(worker_seeds[args.local_rank])
-    torch.manual_seed(33331)
+    seed = random.randint(10000, 99999)
+    torch.manual_seed(seed)
+    print("--------------seed: ", seed)
 
     logger.info("Collecting env info (might take some time)")
     logger.info("\n" + collect_env_info())

@@ -36,7 +36,16 @@ function main {
             generate_core
             # launch
             echo -e "\n\n\n\n Running..."
-            source ${excute_cmd_file}
+            if [[ "${circle_run}" == "1" ]];then
+                return_code="1"
+                while (( ${return_code} != "0" ))
+                do
+                  source ${excute_cmd_file}
+                  return_code=`echo $?`
+                done
+            else
+                source ${excute_cmd_file}
+            fi
             echo -e "Finished.\n\n\n\n"
             # collect launch result
             collect_perf_logs
@@ -58,16 +67,16 @@ function generate_core {
             OOB_EXEC_HEADER+=" -C $(echo ${device_array[i]} |awk -F ';' '{print $1}') "
         elif [ "${device}" == "cuda" ];then
             OOB_EXEC_HEADER=" CUDA_VISIBLE_DEVICES=${device_array[i]} "
-	    if [[ "${mode_name}" == "realtime" ]];then
-	        addtion_options+=" --nv_fuser "
-	    fi
-	fi
+	          if [[ "${mode_name}" == "realtime" ]];then
+	              addtion_options+=" --nv_fuser "
+	          fi
+	      fi
         printf " ${OOB_EXEC_HEADER} \
-	    python tools/train_mlperf.py \
-	        --batch_size ${batch_size} --device ${device} \
-		--num_iter $num_iter --num_warmup $num_warmup \
-		--channels_last $channels_last --precision ${precision} \
-		--config-file "configs/e2e_mask_rcnn_R_50_FPN_1x.yaml" \
+	        python tools/train_mlperf.py \
+	          --batch_size ${batch_size} --device ${device} \
+		        --num_iter $num_iter --num_warmup $num_warmup \
+		        --channels_last $channels_last --precision ${precision} \
+		        --config-file "configs/e2e_mask_rcnn_R_50_FPN_1x.yaml" \
                 ${addtion_options} \
         > ${log_file} 2>&1 &  \n" |tee -a ${excute_cmd_file}
         if [ "${numa_nodes_use}" == "0" ];then
