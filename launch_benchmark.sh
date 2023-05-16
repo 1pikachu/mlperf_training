@@ -37,11 +37,11 @@ function main {
             # launch
             echo -e "\n\n\n\n Running..."
             if [[ "${circle_run}" == "1" ]];then
-                return_code="1"
-                while (( ${return_code} != "0" ))
+                return_code="0"
+                while (( ${return_code} != "1" ))
                 do
                   source ${excute_cmd_file}
-                  return_code=`echo $?`
+                  return_code=`grep -c "Throughput" ${log_file}`
                 done
             else
                 source ${excute_cmd_file}
@@ -72,11 +72,11 @@ function generate_core {
 	          fi
 	      fi
         printf " ${OOB_EXEC_HEADER} \
-	        python tools/train_mlperf.py \
-	          --batch_size ${batch_size} --device ${device} \
-		        --num_iter $num_iter --num_warmup $num_warmup \
-		        --channels_last $channels_last --precision ${precision} \
-		        --config-file "configs/e2e_mask_rcnn_R_50_FPN_1x.yaml" \
+            python tools/train_mlperf.py \
+              --batch_size ${batch_size} --device ${device} \
+              --num_iter $num_iter --num_warmup $num_warmup \
+              --channels_last $channels_last --precision ${precision} \
+              --config-file "configs/e2e_mask_rcnn_R_50_FPN_1x.yaml" \
                 ${addtion_options} \
         > ${log_file} 2>&1 &  \n" |tee -a ${excute_cmd_file}
         if [ "${numa_nodes_use}" == "0" ];then
