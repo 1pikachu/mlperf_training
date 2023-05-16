@@ -41,7 +41,7 @@ function main {
                 while (( ${return_code} != "1" ))
                 do
                   source ${excute_cmd_file}
-                  return_code=`grep -c "Throughput" ${log_file}`
+                  return_code=`grep -c "Throughput" ${log_file}` || true
                 done
             else
                 source ${excute_cmd_file}
