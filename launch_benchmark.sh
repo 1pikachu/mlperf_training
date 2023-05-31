@@ -19,6 +19,7 @@ function main {
     rm -rf mlperf-logging && git clone https://github.com/mlperf/logging.git mlperf-logging
     pip install -e mlperf-logging
 
+    export circle_run=1
     # if multiple use 'xxx,xxx,xxx'
     model_name_list=($(echo "${model_name}" |sed 's/,/ /g'))
     batch_size_list=($(echo "${batch_size}" |sed 's/,/ /g'))
