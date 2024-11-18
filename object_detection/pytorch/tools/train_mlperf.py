@@ -238,6 +238,7 @@ def main():
     parser.add_argument('--num_warmup', default=20, type=int, help='test warmup')
     parser.add_argument('--device', default='cpu', type=str, help='cpu, cuda or xpu')
     parser.add_argument('--nv_fuser', action='store_true', default=False, help='enable nv fuser')
+    parser.add_argument('--ipex', action='store_true', default=False)
 
     parser.add_argument(
         "opts",
@@ -248,8 +249,9 @@ def main():
 
     args = parser.parse_args()
 
-    if args.device == "xpu":
+    if args.device == "xpu" and args.ipex:
         import intel_extension_for_pytorch
+        print("Use IPEX")
     elif args.device == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = False
 
